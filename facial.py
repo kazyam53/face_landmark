@@ -8,8 +8,6 @@ import threading
 import time
 import argparse
 import csv
-import sounddevice as sd
-import soundfile as sf
 import os
 import datetime
 
@@ -17,12 +15,7 @@ import datetime
 # 2.画像から顔のランドマーク検出する関数
 # --------------------------------
 CALIB_NUM = 10
-UPR_MAX = -0.366
-UPR_MIN = 0
-LWR_MAX = 0.558505
-LWR_MIN = 0.0872665
 START_OFFSET = 0.5  # [s]
-DIFF_MIN = 0.0872665
 
 face_detector = dlib.get_frontal_face_detector()
 predictor_path = "shape_predictor_68_face_landmarks.dat"
@@ -31,14 +24,14 @@ lip_right_num = 49
 lip_left_num = 55
 mouth_upr_num = 52
 mouth_lwr_num = 58
-eye_left_upr_num = 45
-eye_left_lwr_num = 47
-eye_left_left_num = 46
-eye_left_right_num = 43
-eye_right_upr_num = 38
-eye_right_lwr_num = 42
-eye_right_left_num = 40
-eye_right_right_num = 37
+eye_right_upr_num = 45
+eye_right_lwr_num = 47
+eye_right_left_num = 46
+eye_right_right_num = 43
+eye_left_upr_num = 38
+eye_left_lwr_num = 42
+eye_left_left_num = 40
+eye_left_right_num = 37
 eyeblow_left_center_num = 25
 eyeblow_left_left_num = 27
 eyeblow_left_right_num = 23
@@ -270,18 +263,7 @@ def filter_val(input):
     return input
 
 
-def convert_to_robot(upr, lwr):
-    upr = upr * (UPR_MAX - UPR_MIN) + UPR_MIN
-    lwr = lwr * (LWR_MAX - LWR_MIN) + LWR_MIN
-    # if lwr - upr < DIFF_MIN:
-    #    lwr = upr + DIFF_MIN
-    return upr, lwr
-
-
 def main() -> None:
-    # parse arguments
-    parser = argparse.ArgumentParser()
-    args = parser.parse_args()
     # --------------------------------
     # 1.顔ランドマーク検出の前準備
     # --------------------------------
@@ -314,7 +296,7 @@ def main() -> None:
         left_eyeblow, right_eyeblow = camera_capture.get_eyeblow()
         # 顔のランドマーク検出(2.の関数呼び出し)
         print(
-            f"upr: {upr}, lwr: {lwr}, left_eye: {left_eye}, right_eye: {right_eye}, left_eyeblow: {left_eyeblow}, right_eyeblow: {right_eyeblow}"
+            f"upr_mouth: {upr:.2f}, lwr_mouth: {lwr:.2f}, left_eye: {left_eye:.2f}, right_eye: {right_eye:.2f}, left_eyeblow: {left_eyeblow:.2f}, right_eyeblow: {right_eyeblow:.2f}"
         )
         upr_close += upr
         lwr_close += lwr
@@ -328,6 +310,10 @@ def main() -> None:
     right_eye_close /= CALIB_NUM
     left_eyeblow_close /= CALIB_NUM
     right_eyeblow_close /= CALIB_NUM
+    print()
+    print(
+        f"Calib CLOSE upr_mouth: {upr_close:.2f}, lwr_mouth: {lwr_close:.2f}, left_eye: {left_eye_close:.2f}, right_eye: {right_eye_close:.2f}, left_eyeblow: {left_eyeblow_close:.2f}, right_eyeblow: {right_eyeblow_close:.2f}"
+    )
 
     print("キャリブ2: 口と目をなるべく開けて画像ウィンドウ上で'a'を押す")
     camera_capture.next_event.wait()
@@ -346,7 +332,7 @@ def main() -> None:
         left_eye, right_eye = camera_capture.get_eye_open()
         left_eyeblow, right_eyeblow = camera_capture.get_eyeblow()
         print(
-            f"upr: {upr}, lwr: {lwr}, left_eye: {left_eye}, right_eye: {right_eye}, left_eyeblow: {left_eyeblow}, right_eyeblow: {right_eyeblow}"
+            f"upr_mouth: {upr:.2f}, lwr_mouth: {lwr:.2f}, left_eye: {left_eye:.2f}, right_eye: {right_eye:.2f}, left_eyeblow: {left_eyeblow:.2f}, right_eyeblow: {right_eyeblow:.2f}"
         )
         upr_open += upr
         lwr_open += lwr
@@ -360,19 +346,17 @@ def main() -> None:
     right_eye_open /= CALIB_NUM
     left_eyeblow_open /= CALIB_NUM
     right_eyeblow_open /= CALIB_NUM
-
+    print()
     print(
-        f"upr_close: {upr_close}, lwr_close: {lwr_close}, upr_open: {upr_open}, lwr_open: {lwr_open}"
+        f"Calib OPEN upr_mouth: {upr_open:.2f}, lwr_mouth: {lwr_open:.2f}, left_eye: {left_eye_open:.2f}, right_eye: {right_eye_open:.2f}, left_eyeblow: {left_eyeblow_open:.2f}, right_eyeblow: {right_eyeblow_open:.2f}"
     )
+
 
     print("画像ウィンドウ上で'a'で計測開始。'q'で終了")
     camera_capture.next_event.wait()
     camera_capture.next_event.clear()
-    angle_vector = []
-    start_time = time.time()
     # カメラ画像の表示 ('q'入力で終了)
     while not camera_capture.exit_event.is_set():
-        cur_str = []
         camera_capture.update_event.wait(1)
         camera_capture.update_event.clear()
         # 口の開き幅を計算
@@ -401,15 +385,13 @@ def main() -> None:
         right_eyeblow_now = filter_val(right_eyeblow_now)
 
         # 計算結果を表示(0.0~1.0に正規化)
-        print(f"upr: {upr_now}, lwr: {lwr_now}")
-        print(f"left_eye: {left_eye_now}, right_eye: {right_eye_now}")
-        print(f"left_eyeblow: {left_eyeblow_now}, right_eyeblow: {right_eyeblow_now}")
+        print("--------------------------------------")
+        print(f"upr: {upr_now:.2f}, lwr: {lwr_now:.2f}")
+        print(f"left_eye: {left_eye_now:.2f}, right_eye: {right_eye_now:.2f}")
+        print(
+            f"left_eyeblow: {left_eyeblow_now:.2f}, right_eyeblow: {right_eyeblow_now:.2f}"
+        )
 
-        # 顔のランドマーク検出(2.の関数呼び出し)
-        now = int((time.time() - start_time - START_OFFSET) * 1000)
-        if now <= 0.0:
-            continue
-    # 最後の1つを消す
     print("end")
     capture_thread.join()
 
