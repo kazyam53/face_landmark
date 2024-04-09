@@ -1,0 +1,9 @@
+cffi==1.16.0
+dlib==19.24.2
+imutils==0.5.4
+libopencv==0.0.1
+numpy==1.26.1
+opencv-python==4.8.1.78
+pycparser==2.21
+sounddevice==0.4.6
+soundfile==0.12.1
