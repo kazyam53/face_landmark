@@ -1,4 +1,3 @@
-
 """
 Eye Tracking and Head Pose Estimation
 
@@ -69,8 +68,8 @@ import os
 from AngleBuffer import AngleBuffer
 
 
-#-----------------------------------------------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------------------------------------
 
 # Parameters Documentation
 
@@ -189,7 +188,7 @@ EYE_AR_CONSEC_FRAMES = (
 SERVER_ADDRESS = (SERVER_IP, SERVER_PORT)
 
 
-#If set to false it will wait for your command (hittig 'r') to start logging.
+# If set to false it will wait for your command (hittig 'r') to start logging.
 IS_RECORDING = False  # Controls whether data is being logged
 
 # Command-line arguments for camera source
@@ -256,45 +255,70 @@ def euclidean_distance_3D(points):
 
     return distance
 
+
 def estimate_head_pose(landmarks, image_size):
     # Scale factor based on user's face width (assumes model face width is 150mm)
     scale_factor = USER_FACE_WIDTH / 150.0
     # 3D model points.
-    model_points = np.array([
-        (0.0, 0.0, 0.0),             # Nose tip
-        (0.0, -330.0 * scale_factor, -65.0 * scale_factor),        # Chin
-        (-225.0 * scale_factor, 170.0 * scale_factor, -135.0 * scale_factor),     # Left eye left corner
-        (225.0 * scale_factor, 170.0 * scale_factor, -135.0 * scale_factor),      # Right eye right corner
-        (-150.0 * scale_factor, -150.0 * scale_factor, -125.0 * scale_factor),    # Left Mouth corner
-        (150.0 * scale_factor, -150.0 * scale_factor, -125.0 * scale_factor)      # Right mouth corner
-    ])
-
+    model_points = np.array(
+        [
+            (0.0, 0.0, 0.0),  # Nose tip
+            (0.0, -330.0 * scale_factor, -65.0 * scale_factor),  # Chin
+            (
+                -225.0 * scale_factor,
+                170.0 * scale_factor,
+                -135.0 * scale_factor,
+            ),  # Left eye left corner
+            (
+                225.0 * scale_factor,
+                170.0 * scale_factor,
+                -135.0 * scale_factor,
+            ),  # Right eye right corner
+            (
+                -150.0 * scale_factor,
+                -150.0 * scale_factor,
+                -125.0 * scale_factor,
+            ),  # Left Mouth corner
+            (
+                150.0 * scale_factor,
+                -150.0 * scale_factor,
+                -125.0 * scale_factor,
+            ),  # Right mouth corner
+        ]
+    )
 
     # Camera internals
     focal_length = image_size[1]
-    center = (image_size[1]/2, image_size[0]/2)
+    center = (image_size[1] / 2, image_size[0] / 2)
     camera_matrix = np.array(
-        [[focal_length, 0, center[0]],
-         [0, focal_length, center[1]],
-         [0, 0, 1]], dtype = "double"
+        [[focal_length, 0, center[0]], [0, focal_length, center[1]], [0, 0, 1]],
+        dtype="double",
     )
 
     # Assuming no lens distortion
-    dist_coeffs = np.zeros((4,1))
+    dist_coeffs = np.zeros((4, 1))
 
     # 2D image points from landmarks, using defined indices
-    image_points = np.array([
-        landmarks[NOSE_TIP_INDEX],            # Nose tip
-        landmarks[CHIN_INDEX],                # Chin
-        landmarks[LEFT_EYE_LEFT_CORNER_INDEX],  # Left eye left corner
-        landmarks[RIGHT_EYE_RIGHT_CORNER_INDEX],  # Right eye right corner
-        landmarks[LEFT_MOUTH_CORNER_INDEX],      # Left mouth corner
-        landmarks[RIGHT_MOUTH_CORNER_INDEX]      # Right mouth corner
-    ], dtype="double")
+    image_points = np.array(
+        [
+            landmarks[NOSE_TIP_INDEX],  # Nose tip
+            landmarks[CHIN_INDEX],  # Chin
+            landmarks[LEFT_EYE_LEFT_CORNER_INDEX],  # Left eye left corner
+            landmarks[RIGHT_EYE_RIGHT_CORNER_INDEX],  # Right eye right corner
+            landmarks[LEFT_MOUTH_CORNER_INDEX],  # Left mouth corner
+            landmarks[RIGHT_MOUTH_CORNER_INDEX],  # Right mouth corner
+        ],
+        dtype="double",
+    )
 
-
-        # Solve for pose
-    (success, rotation_vector, translation_vector) = cv.solvePnP(model_points, image_points, camera_matrix, dist_coeffs, flags=cv.SOLVEPNP_ITERATIVE)
+    # Solve for pose
+    (success, rotation_vector, translation_vector) = cv.solvePnP(
+        model_points,
+        image_points,
+        camera_matrix,
+        dist_coeffs,
+        flags=cv.SOLVEPNP_ITERATIVE,
+    )
 
     # Convert rotation vector to rotation matrix
     rotation_matrix, _ = cv.Rodrigues(rotation_vector)
@@ -306,11 +330,11 @@ def estimate_head_pose(landmarks, image_size):
     _, _, _, _, _, _, euler_angles = cv.decomposeProjectionMatrix(projection_matrix)
     pitch, yaw, roll = euler_angles.flatten()[:3]
 
-
-     # Normalize the pitch angle
+    # Normalize the pitch angle
     pitch = normalize_pitch(pitch)
 
     return pitch, yaw, roll
+
 
 def normalize_pitch(pitch):
     """
@@ -362,6 +386,12 @@ def blinking_ratio(landmarks):
     ratio = (right_eye_ratio + left_eye_ratio + 1) / 2
 
     return ratio
+
+
+def pos_between_two_point(input, min, max):
+    dist_from_min = euclidean_distance_3D(landmarks[min, input])
+    dist_from_max = euclidean_distance_3D(landmarks[max, input])
+    return dist_from_min / (dist_from_min + dist_from_max)
 
 
 # Initializing MediaPipe face mesh and camera
@@ -422,7 +452,7 @@ try:
 
         # Flipping the frame for a mirror effect
         # I think we better not flip to correspond with real world... need to make sure later...
-        #frame = cv.flip(frame, 1)
+        # frame = cv.flip(frame, 1)
         rgb_frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
         img_h, img_w = frame.shape[:2]
         results = mp_face_mesh.process(rgb_frame)
@@ -548,29 +578,70 @@ try:
                 frame, center_right, int(r_radius), (255, 0, 255), 2, cv.LINE_AA
             )  # Right iris
             cv.circle(
-                frame, mesh_points[LEFT_EYE_INNER_CORNER][0], 3, (255, 255, 255), -1, cv.LINE_AA
+                frame,
+                mesh_points[LEFT_EYE_INNER_CORNER][0],
+                3,
+                (255, 255, 255),
+                -1,
+                cv.LINE_AA,
             )  # Left eye right corner
             cv.circle(
-                frame, mesh_points[LEFT_EYE_OUTER_CORNER][0], 3, (0, 255, 255), -1, cv.LINE_AA
+                frame,
+                mesh_points[LEFT_EYE_OUTER_CORNER][0],
+                3,
+                (0, 255, 255),
+                -1,
+                cv.LINE_AA,
             )  # Left eye left corner
             cv.circle(
-                frame, mesh_points[RIGHT_EYE_INNER_CORNER][0], 3, (255, 255, 255), -1, cv.LINE_AA
+                frame,
+                mesh_points[RIGHT_EYE_INNER_CORNER][0],
+                3,
+                (255, 255, 255),
+                -1,
+                cv.LINE_AA,
             )  # Right eye right corner
             cv.circle(
-                frame, mesh_points[RIGHT_EYE_OUTER_CORNER][0], 3, (0, 255, 255), -1, cv.LINE_AA
+                frame,
+                mesh_points[RIGHT_EYE_OUTER_CORNER][0],
+                3,
+                (0, 255, 255),
+                -1,
+                cv.LINE_AA,
             )  # Right eye left corner
 
             # Calculating relative positions
-            l_dx, l_dy = vector_position(mesh_points[LEFT_EYE_OUTER_CORNER], center_left)
-            r_dx, r_dy = vector_position(mesh_points[RIGHT_EYE_OUTER_CORNER], center_right)
-
+            l_dx, l_dy = vector_position(
+                mesh_points[RIGHT_EYE_OUTER_CORNER], center_left
+            )
+            r_dx, r_dy = vector_position(
+                mesh_points[RIGHT_EYE_OUTER_CORNER], center_right
+            )
+            """
+            left_eye_pos = pos_between_two_point(
+                mesh_points_3D,
+                LEFT_EYE_IRIS[1],
+                LEFT_EYE_OUTER_CORNER,
+                LEFT_EYE_INNER_CORNER,
+            )
+            right_eye_pos = pos_between_two_point(
+                mesh_points_3D,
+                RIGHT_EYE_IRIS[1],
+                RIGHT_EYE_OUTER_CORNER,
+                RIGHT_EYE_INNER_CORNER,
+            )
+            """
             # Printing data if enabled
             if PRINT_DATA:
                 print(f"Total Blinks: {TOTAL_BLINKS}")
-                print(f"Left Eye Center X: {l_cx} Y: {l_cy}")
-                print(f"Right Eye Center X: {r_cx} Y: {r_cy}")
+                # print(f"Left Eye Center X: {l_cx} Y: {l_cy}")
+                # print(f"Right Eye Center X: {r_cx} Y: {r_cy}")
+                #print(f"Left Eye Center: {left_eye_pos}")
+                print(f"Left Eye Center: {mesh_points[RIGHT_EYE_OUTER_CORNER]}")
+                print(f"Right Eye Center: {r_cx} Y: {r_cy}")
                 print(f"Left Iris Relative Pos Dx: {l_dx} Dy: {l_dy}")
                 print(f"Right Iris Relative Pos Dx: {r_dx} Dy: {r_dy}\n")
+
                 # Check if head pose estimation is enabled
                 if ENABLE_HEAD_POSE:
                     pitch, yaw, roll = estimate_head_pose(mesh_points, (img_h, img_w))
@@ -578,7 +649,7 @@ try:
                     pitch, yaw, roll = angle_buffer.get_average()
 
                     # Set initial angles on first successful estimation or recalibrate
-                    if initial_pitch is None or (key == ord('c') and calibrated):
+                    if initial_pitch is None or (key == ord("c") and calibrated):
                         initial_pitch, initial_yaw, initial_roll = pitch, yaw, roll
                         calibrated = True
                         if PRINT_DATA:
@@ -590,9 +661,10 @@ try:
                         yaw -= initial_yaw
                         roll -= initial_roll
 
-
                     if PRINT_DATA:
-                        print(f"Head Pose Angles: Pitch={pitch}, Yaw={yaw}, Roll={roll}")
+                        print(
+                            f"Head Pose Angles: Pitch={pitch}, Yaw={yaw}, Roll={roll}"
+                        )
             # Logging data
             if LOG_DATA:
                 timestamp = int(time.time() * 1000)  # Current timestamp in milliseconds
@@ -608,7 +680,18 @@ try:
                     r_dy,
                     TOTAL_BLINKS,
                 ]  # Include blink count in CSV
-                log_entry = [timestamp, l_cx, l_cy, r_cx, r_cy, l_dx, l_dy, r_dx, r_dy, TOTAL_BLINKS]  # Include blink count in CSV
+                log_entry = [
+                    timestamp,
+                    l_cx,
+                    l_cy,
+                    r_cx,
+                    r_cy,
+                    l_dx,
+                    l_dy,
+                    r_dx,
+                    r_dy,
+                    TOTAL_BLINKS,
+                ]  # Include blink count in CSV
 
                 # Append head pose data if enabled
                 if ENABLE_HEAD_POSE:
@@ -622,17 +705,53 @@ try:
             packet = np.array([l_cx, l_cy, l_dx, l_dy], dtype=np.int32)
             iris_socket.sendto(bytes(packet), SERVER_ADDRESS)
 
-        # Writing the on screen data on the frame
+            # Writing the on screen data on the frame
             if SHOW_ON_SCREEN_DATA:
                 if IS_RECORDING:
-                    cv.circle(frame, (30, 30), 10, (0, 0, 255), -1)  # Red circle at the top-left corner
-                cv.putText(frame, f"Blinks: {TOTAL_BLINKS}", (30, 80), cv.FONT_HERSHEY_DUPLEX, 0.8, (0, 255, 0), 2, cv.LINE_AA)
+                    cv.circle(
+                        frame, (30, 30), 10, (0, 0, 255), -1
+                    )  # Red circle at the top-left corner
+                cv.putText(
+                    frame,
+                    f"Blinks: {TOTAL_BLINKS}",
+                    (30, 80),
+                    cv.FONT_HERSHEY_DUPLEX,
+                    0.8,
+                    (0, 255, 0),
+                    2,
+                    cv.LINE_AA,
+                )
                 if ENABLE_HEAD_POSE:
-                    cv.putText(frame, f"Pitch: {int(pitch)}", (30, 110), cv.FONT_HERSHEY_DUPLEX, 0.8, (0, 255, 0), 2, cv.LINE_AA)
-                    cv.putText(frame, f"Yaw: {int(yaw)}", (30, 140), cv.FONT_HERSHEY_DUPLEX, 0.8, (0, 255, 0), 2, cv.LINE_AA)
-                    cv.putText(frame, f"Roll: {int(roll)}", (30, 170), cv.FONT_HERSHEY_DUPLEX, 0.8, (0, 255, 0), 2, cv.LINE_AA)
-
-
+                    cv.putText(
+                        frame,
+                        f"Pitch: {int(pitch)}",
+                        (30, 110),
+                        cv.FONT_HERSHEY_DUPLEX,
+                        0.8,
+                        (0, 255, 0),
+                        2,
+                        cv.LINE_AA,
+                    )
+                    cv.putText(
+                        frame,
+                        f"Yaw: {int(yaw)}",
+                        (30, 140),
+                        cv.FONT_HERSHEY_DUPLEX,
+                        0.8,
+                        (0, 255, 0),
+                        2,
+                        cv.LINE_AA,
+                    )
+                    cv.putText(
+                        frame,
+                        f"Roll: {int(roll)}",
+                        (30, 170),
+                        cv.FONT_HERSHEY_DUPLEX,
+                        0.8,
+                        (0, 255, 0),
+                        2,
+                        cv.LINE_AA,
+                    )
 
         # Displaying the processed frame
         cv.imshow("Eye Tracking", frame)
@@ -640,13 +759,13 @@ try:
         key = cv.waitKey(1) & 0xFF
 
         # Calibrate on 'c' key press
-        if key == ord('c'):
+        if key == ord("c"):
             initial_pitch, initial_yaw, initial_roll = pitch, yaw, roll
             if PRINT_DATA:
                 print("Head pose recalibrated.")
 
         # Inside the main loop, handle the 'r' key press
-        if key == ord('r'):
+        if key == ord("r"):
 
             IS_RECORDING = not IS_RECORDING
             if IS_RECORDING:
@@ -654,9 +773,8 @@ try:
             else:
                 print("Recording paused.")
 
-
         # Exit on 'q' key press
-        if key == ord('q'):
+        if key == ord("q"):
             if PRINT_DATA:
                 print("Exiting program...")
             break
