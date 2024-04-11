@@ -389,8 +389,8 @@ def blinking_ratio(landmarks):
 
 
 def pos_between_two_point(input, min, max):
-    dist_from_min = euclidean_distance_3D(landmarks[min, input])
-    dist_from_max = euclidean_distance_3D(landmarks[max, input])
+    dist_from_min = math.sqrt((input[0] - min[0])*(input[0] - min[0]) + (input[1] - min[1])*(input[1] - min[1]))
+    dist_from_max = math.sqrt((input[0] - max[0])*(input[0] - max[0]) + (input[1] - max[1])*(input[1] - max[1]))
     return dist_from_min / (dist_from_min + dist_from_max)
 
 
@@ -617,20 +617,17 @@ try:
             r_dx, r_dy = vector_position(
                 mesh_points[RIGHT_EYE_OUTER_CORNER], center_right
             )
-            """
+
             left_eye_pos = pos_between_two_point(
-                mesh_points_3D,
-                LEFT_EYE_IRIS[1],
-                LEFT_EYE_OUTER_CORNER,
-                LEFT_EYE_INNER_CORNER,
+                mesh_points[LEFT_EYE_IRIS[1]],
+                mesh_points[LEFT_EYE_OUTER_CORNER],
+                mesh_points[LEFT_EYE_INNER_CORNER],
             )
             right_eye_pos = pos_between_two_point(
-                mesh_points_3D,
-                RIGHT_EYE_IRIS[1],
-                RIGHT_EYE_OUTER_CORNER,
-                RIGHT_EYE_INNER_CORNER,
+                mesh_points[RIGHT_EYE_IRIS[1]],
+                mesh_points[RIGHT_EYE_OUTER_CORNER],
+                mesh_points[RIGHT_EYE_INNER_CORNER],
             )
-            """
             # Printing data if enabled
             if PRINT_DATA:
                 print(f"Total Blinks: {TOTAL_BLINKS}")
