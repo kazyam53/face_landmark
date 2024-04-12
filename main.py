@@ -66,25 +66,25 @@ import csv
 from datetime import datetime
 import os
 from AngleBuffer import AngleBuffer
-
+import threading
 
 # -----------------------------------------------------------------------------------------------------------------------------------
 # -----------------------------------------------------------------------------------------------------------------------------------
 
 # Parameters Documentation
 
-## User-Specific Measurements
+# User-Specific Measurements
 # USER_FACE_WIDTH: The horizontal distance between the outer edges of the user's cheekbones in millimeters.
 # This measurement is used to scale the 3D model points for head pose estimation.
 # Measure your face width and adjust the value accordingly.
 USER_FACE_WIDTH = 140  # [mm]
 
-## Camera Parameters (not currently used in calculations)
+# Camera Parameters (not currently used in calculations)
 # NOSE_TO_CAMERA_DISTANCE: The distance from the tip of the nose to the camera lens in millimeters.
 # Intended for future use where accurate physical distance measurements may be necessary.
 NOSE_TO_CAMERA_DISTANCE = 600  # [mm]
 
-## Configuration Parameters
+# Configuration Parameters
 # PRINT_DATA: Enable or disable the printing of data to the console for debugging.
 PRINT_DATA = True
 
@@ -103,18 +103,18 @@ LOG_ALL_FEATURES = False
 # ENABLE_HEAD_POSE: Enable the head position and orientation estimator.
 ENABLE_HEAD_POSE = True
 
-## Logging Configuration
+# Logging Configuration
 # LOG_FOLDER: Directory where log files will be stored.
 LOG_FOLDER = "logs"
 
-## Server Configuration
+# Server Configuration
 # SERVER_IP: IP address of the server for sending data via UDP (default is localhost).
 SERVER_IP = "127.0.0.1"
 
 # SERVER_PORT: Port number for the server to listen on.
 SERVER_PORT = 7070
 
-## Blink Detection Parameters
+# Blink Detection Parameters
 # SHOW_ON_SCREEN_DATA: If True, display blink count and head pose angles on the video feed.
 SHOW_ON_SCREEN_DATA = True
 
@@ -130,7 +130,7 @@ BLINK_THRESHOLD = 0.51
 # EYE_AR_CONSEC_FRAMES: Number of consecutive frames below the threshold required to confirm a blink.
 EYE_AR_CONSEC_FRAMES = 2
 
-## Head Pose Estimation Landmark Indices
+# Head Pose Estimation Landmark Indices
 # These indices correspond to the specific facial landmarks used for head pose estimation.
 LEFT_EYE_IRIS = [474, 475, 476, 477]
 RIGHT_EYE_IRIS = [469, 470, 471, 472]
@@ -138,8 +138,18 @@ LEFT_EYE_OUTER_CORNER = [33]
 LEFT_EYE_INNER_CORNER = [133]
 RIGHT_EYE_OUTER_CORNER = [362]
 RIGHT_EYE_INNER_CORNER = [263]
+RIGHT_EYE_OUTER_CORNER = [362]
+RIGHT_EYE_INNER_CORNER = [263]
 RIGHT_EYE_POINTS = [33, 160, 159, 158, 133, 153, 145, 144]
 LEFT_EYE_POINTS = [362, 385, 386, 387, 263, 373, 374, 380]
+RIGHT_EYELID_UPPER = [27]
+RIGHT_EYELID_LOWER = [24]
+LEFT_EYELID_UPPER = [257]
+LEFT_EYELID_LOWER = [253]
+LEFT_EYEBLOW = [334]
+RIGHT_EYEBLOW = [105]
+MOUTH_UPPER = [0]
+MOUTH_LOWER = [17]
 NOSE_TIP_INDEX = 4
 CHIN_INDEX = 152
 LEFT_EYE_LEFT_CORNER_INDEX = 33
@@ -147,12 +157,12 @@ RIGHT_EYE_RIGHT_CORNER_INDEX = 263
 LEFT_MOUTH_CORNER_INDEX = 61
 RIGHT_MOUTH_CORNER_INDEX = 291
 
-## MediaPipe Model Confidence Parameters
+# MediaPipe Model Confidence Parameters
 # These thresholds determine how confidently the model must detect or track to consider the results valid.
 MIN_DETECTION_CONFIDENCE = 0.8
 MIN_TRACKING_CONFIDENCE = 0.8
 
-## Angle Normalization Parameters
+# Angle Normalization Parameters
 # MOVING_AVERAGE_WINDOW: The number of frames over which to calculate the moving average for smoothing angles.
 MOVING_AVERAGE_WINDOW = 10
 
@@ -175,7 +185,8 @@ SERVER_IP = "127.0.0.1"  # Set the server IP address (localhost)
 SERVER_PORT = 7070  # Set the server port
 
 # eyes blinking variables
-SHOW_BLINK_COUNT_ON_SCREEN = True  # Toggle to show the blink count on the video feed
+# Toggle to show the blink count on the video feed
+SHOW_BLINK_COUNT_ON_SCREEN = True
 TOTAL_BLINKS = 0  # Tracks the total number of blinks detected
 EYES_BLINK_FRAME_COUNTER = (
     0  # Counts the number of consecutive frames with a potential blink
@@ -217,8 +228,30 @@ _indices_pose = [1, 33, 61, 199, 263, 291]
 # Server address for UDP socket communication
 SERVER_ADDRESS = (SERVER_IP, 7070)
 
+CALIB_NUM = 20
+mouth = 0
+eyeblow_left = 0
+eyeblow_right = 0
+eyelid_left = 0
+eyelid_right = 0
+mouth = 0
+eyeblow_left_dist = 0
+eyeblow_right_dist = 0
+eyelid_left_dist = 0
+eyelid_right_dist = 0
+left_eye_pos = 0
+right_eye_pos = 0
+
+pitch = 0
+roll = 0
+yaw = 0
+update_event = threading.Event()
+exit_event = threading.Event()
+next_event = threading.Event()
 
 # Function to calculate vector position
+
+
 def vector_position(point1, point2):
     x1, y1 = point1.ravel()
     x2, y2 = point2.ravel()
@@ -324,10 +357,12 @@ def estimate_head_pose(landmarks, image_size):
     rotation_matrix, _ = cv.Rodrigues(rotation_vector)
 
     # Combine rotation matrix and translation vector to form a 3x4 projection matrix
-    projection_matrix = np.hstack((rotation_matrix, translation_vector.reshape(-1, 1)))
+    projection_matrix = np.hstack(
+        (rotation_matrix, translation_vector.reshape(-1, 1)))
 
     # Decompose the projection matrix to extract Euler angles
-    _, _, _, _, _, _, euler_angles = cv.decomposeProjectionMatrix(projection_matrix)
+    _, _, _, _, _, _, euler_angles = cv.decomposeProjectionMatrix(
+        projection_matrix)
     pitch, yaw, roll = euler_angles.flatten()[:3]
 
     # Normalize the pitch angle
@@ -389,414 +424,655 @@ def blinking_ratio(landmarks):
 
 
 def pos_between_two_point(input, min, max):
-    dist_from_min = math.sqrt((input[0] - min[0])*(input[0] - min[0]) + (input[1] - min[1])*(input[1] - min[1]))
-    dist_from_max = math.sqrt((input[0] - max[0])*(input[0] - max[0]) + (input[1] - max[1])*(input[1] - max[1]))
+    dist_from_min = math.sqrt(
+        (input[0] - min[0]) * (input[0] - min[0])
+        + (input[1] - min[1]) * (input[1] - min[1])
+    )
+    dist_from_max = math.sqrt(
+        (input[0] - max[0]) * (input[0] - max[0])
+        + (input[1] - max[1]) * (input[1] - max[1])
+    )
     return dist_from_min / (dist_from_min + dist_from_max)
 
 
-# Initializing MediaPipe face mesh and camera
-if PRINT_DATA:
-    print("Initializing the face mesh and camera...")
+def distance(a, b):
+    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+
+
+def normalize(input, min, max):
+    res = input / (max - min) - (min / (max - min))
+    if res > 1.0:
+        res = 1.0
+    elif res < 0.0:
+        res = 0.0
+    return res
+
+
+def capture() -> None:
+    global mouth_dist, eyeblow_left_dist, eyeblow_right_dist, eyelid_left_dist, eyelid_right_dist
+    global left_eye_pos, right_eye_pos
+    global update_event
+    global next_event
+    global exit_event
+    global IS_RECORDING
+    global EYES_BLINK_FRAME_COUNTER
+    global TOTAL_BLINKS
+    global initial_pitch, initial_roll, initial_yaw
+    global pitch, roll, yaw
+    # Initializing MediaPipe face mesh and camera
     if PRINT_DATA:
-        head_pose_status = "enabled" if ENABLE_HEAD_POSE else "disabled"
-        print(f"Head pose estimation is {head_pose_status}.")
+        print("Initializing the face mesh and camera...")
+        if PRINT_DATA:
+            head_pose_status = "enabled" if ENABLE_HEAD_POSE else "disabled"
+            print(f"Head pose estimation is {head_pose_status}.")
 
-mp_face_mesh = mp.solutions.face_mesh.FaceMesh(
-    max_num_faces=1,
-    refine_landmarks=True,
-    min_detection_confidence=MIN_DETECTION_CONFIDENCE,
-    min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
-)
-cam_source = int(args.camSource)
-cap = cv.VideoCapture(cam_source)
-
-# Initializing socket for data transmission
-iris_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-# Preparing for CSV logging
-csv_data = []
-if not os.path.exists(LOG_FOLDER):
-    os.makedirs(LOG_FOLDER)
-
-# Column names for CSV file
-column_names = [
-    "Timestamp (ms)",
-    "Left Eye Center X",
-    "Left Eye Center Y",
-    "Right Eye Center X",
-    "Right Eye Center Y",
-    "Left Iris Relative Pos Dx",
-    "Left Iris Relative Pos Dy",
-    "Right Iris Relative Pos Dx",
-    "Right Iris Relative Pos Dy",
-    "Total Blink Count",
-]
-# Add head pose columns if head pose estimation is enabled
-if ENABLE_HEAD_POSE:
-    column_names.extend(["Pitch", "Yaw", "Roll"])
-
-if LOG_ALL_FEATURES:
-    column_names.extend(
-        [f"Landmark_{i}_X" for i in range(468)]
-        + [f"Landmark_{i}_Y" for i in range(468)]
+    mp_face_mesh = mp.solutions.face_mesh.FaceMesh(
+        max_num_faces=1,
+        refine_landmarks=True,
+        min_detection_confidence=MIN_DETECTION_CONFIDENCE,
+        min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
     )
+    cam_source = int(args.camSource)
+    cap = cv.VideoCapture(cam_source)
 
-# Main loop for video capture and processing
-try:
-    angle_buffer = AngleBuffer(size=MOVING_AVERAGE_WINDOW)  # Adjust size for smoothing
+    # Initializing socket for data transmission
+    iris_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    # Preparing for CSV logging
+    csv_data = []
+    if not os.path.exists(LOG_FOLDER):
+        os.makedirs(LOG_FOLDER)
 
-        # Flipping the frame for a mirror effect
-        # I think we better not flip to correspond with real world... need to make sure later...
-        # frame = cv.flip(frame, 1)
-        rgb_frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
-        img_h, img_w = frame.shape[:2]
-        results = mp_face_mesh.process(rgb_frame)
+    # Column names for CSV file
+    column_names = [
+        "Timestamp (ms)",
+        "Left Eye Center X",
+        "Left Eye Center Y",
+        "Right Eye Center X",
+        "Right Eye Center Y",
+        "Left Iris Relative Pos Dx",
+        "Left Iris Relative Pos Dy",
+        "Right Iris Relative Pos Dx",
+        "Right Iris Relative Pos Dy",
+        "Total Blink Count",
+    ]
+    # Add head pose columns if head pose estimation is enabled
+    if ENABLE_HEAD_POSE:
+        column_names.extend(["Pitch", "Yaw", "Roll"])
 
-        if results.multi_face_landmarks:
-            mesh_points = np.array(
-                [
-                    np.multiply([p.x, p.y], [img_w, img_h]).astype(int)
-                    for p in results.multi_face_landmarks[0].landmark
-                ]
-            )
-
-            # Get the 3D landmarks from facemesh x, y and z(z is distance from 0 points)
-            # just normalize values
-            mesh_points_3D = np.array(
-                [[n.x, n.y, n.z] for n in results.multi_face_landmarks[0].landmark]
-            )
-            # getting the head pose estimation 3d points
-            head_pose_points_3D = np.multiply(
-                mesh_points_3D[_indices_pose], [img_w, img_h, 1]
-            )
-            head_pose_points_2D = mesh_points[_indices_pose]
-
-            # collect nose three dimension and two dimension points
-            nose_3D_point = np.multiply(head_pose_points_3D[0], [1, 1, 3000])
-            nose_2D_point = head_pose_points_2D[0]
-
-            # create the camera matrix
-            focal_length = 1 * img_w
-
-            cam_matrix = np.array(
-                [[focal_length, 0, img_h / 2], [0, focal_length, img_w / 2], [0, 0, 1]]
-            )
-
-            # The distortion parameters
-            dist_matrix = np.zeros((4, 1), dtype=np.float64)
-
-            head_pose_points_2D = np.delete(head_pose_points_3D, 2, axis=1)
-            head_pose_points_3D = head_pose_points_3D.astype(np.float64)
-            head_pose_points_2D = head_pose_points_2D.astype(np.float64)
-            # Solve PnP
-            success, rot_vec, trans_vec = cv.solvePnP(
-                head_pose_points_3D, head_pose_points_2D, cam_matrix, dist_matrix
-            )
-            # Get rotational matrix
-            rotation_matrix, jac = cv.Rodrigues(rot_vec)
-
-            # Get angles
-            angles, mtxR, mtxQ, Qx, Qy, Qz = cv.RQDecomp3x3(rotation_matrix)
-
-            # Get the y rotation degree
-            angle_x = angles[0] * 360
-            angle_y = angles[1] * 360
-            z = angles[2] * 360
-
-            # if angle cross the values then
-            threshold_angle = 10
-            # See where the user's head tilting
-            if angle_y < -threshold_angle:
-                face_looks = "Left"
-            elif angle_y > threshold_angle:
-                face_looks = "Right"
-            elif angle_x < -threshold_angle:
-                face_looks = "Down"
-            elif angle_x > threshold_angle:
-                face_looks = "Up"
-            else:
-                face_looks = "Forward"
-            if SHOW_ON_SCREEN_DATA:
-                cv.putText(
-                    frame,
-                    f"Face Looking at {face_looks}",
-                    (img_w - 400, 80),
-                    cv.FONT_HERSHEY_TRIPLEX,
-                    0.8,
-                    (0, 255, 0),
-                    2,
-                    cv.LINE_AA,
-                )
-            # Display the nose direction
-            nose_3d_projection, jacobian = cv.projectPoints(
-                nose_3D_point, rot_vec, trans_vec, cam_matrix, dist_matrix
-            )
-
-            p1 = nose_2D_point
-            p2 = (
-                int(nose_2D_point[0] + angle_y * 10),
-                int(nose_2D_point[1] - angle_x * 10),
-            )
-
-            cv.line(frame, p1, p2, (255, 0, 255), 3)
-            # getting the blinking ratio
-            eyes_aspect_ratio = blinking_ratio(mesh_points_3D)
-            # print(f"Blinking ratio : {ratio}")
-            # checking if ear less then or equal to required threshold if yes then
-            # count the number of frame frame while eyes are closed.
-            if eyes_aspect_ratio <= BLINK_THRESHOLD:
-                EYES_BLINK_FRAME_COUNTER += 1
-            # else check if eyes are closed is greater EYE_AR_CONSEC_FRAMES frame then
-            # count the this as a blink
-            # make frame counter equal to zero
-
-            else:
-                if EYES_BLINK_FRAME_COUNTER > EYE_AR_CONSEC_FRAMES:
-                    TOTAL_BLINKS += 1
-                EYES_BLINK_FRAME_COUNTER = 0
-
-            # Display all facial landmarks if enabled
-            if SHOW_ALL_FEATURES:
-                for point in mesh_points:
-                    cv.circle(frame, tuple(point), 1, (0, 255, 0), -1)
-            # Process and display eye features
-            (l_cx, l_cy), l_radius = cv.minEnclosingCircle(mesh_points[LEFT_EYE_IRIS])
-            (r_cx, r_cy), r_radius = cv.minEnclosingCircle(mesh_points[RIGHT_EYE_IRIS])
-            center_left = np.array([l_cx, l_cy], dtype=np.int32)
-            center_right = np.array([r_cx, r_cy], dtype=np.int32)
-
-            # Highlighting the irises and corners of the eyes
-            cv.circle(
-                frame, center_left, int(l_radius), (255, 0, 255), 2, cv.LINE_AA
-            )  # Left iris
-            cv.circle(
-                frame, center_right, int(r_radius), (255, 0, 255), 2, cv.LINE_AA
-            )  # Right iris
-            cv.circle(
-                frame,
-                mesh_points[LEFT_EYE_INNER_CORNER][0],
-                3,
-                (255, 255, 255),
-                -1,
-                cv.LINE_AA,
-            )  # Left eye right corner
-            cv.circle(
-                frame,
-                mesh_points[LEFT_EYE_OUTER_CORNER][0],
-                3,
-                (0, 255, 255),
-                -1,
-                cv.LINE_AA,
-            )  # Left eye left corner
-            cv.circle(
-                frame,
-                mesh_points[RIGHT_EYE_INNER_CORNER][0],
-                3,
-                (255, 255, 255),
-                -1,
-                cv.LINE_AA,
-            )  # Right eye right corner
-            cv.circle(
-                frame,
-                mesh_points[RIGHT_EYE_OUTER_CORNER][0],
-                3,
-                (0, 255, 255),
-                -1,
-                cv.LINE_AA,
-            )  # Right eye left corner
-
-            # Calculating relative positions
-            l_dx, l_dy = vector_position(
-                mesh_points[RIGHT_EYE_OUTER_CORNER], center_left
-            )
-            r_dx, r_dy = vector_position(
-                mesh_points[RIGHT_EYE_OUTER_CORNER], center_right
-            )
-
-            left_eye_pos = pos_between_two_point(
-                mesh_points[LEFT_EYE_IRIS[1]],
-                mesh_points[LEFT_EYE_OUTER_CORNER],
-                mesh_points[LEFT_EYE_INNER_CORNER],
-            )
-            right_eye_pos = pos_between_two_point(
-                mesh_points[RIGHT_EYE_IRIS[1]],
-                mesh_points[RIGHT_EYE_OUTER_CORNER],
-                mesh_points[RIGHT_EYE_INNER_CORNER],
-            )
-            # Printing data if enabled
-            if PRINT_DATA:
-                print(f"Total Blinks: {TOTAL_BLINKS}")
-                # print(f"Left Eye Center X: {l_cx} Y: {l_cy}")
-                # print(f"Right Eye Center X: {r_cx} Y: {r_cy}")
-                #print(f"Left Eye Center: {left_eye_pos}")
-                print(f"Left Eye Center: {mesh_points[RIGHT_EYE_OUTER_CORNER]}")
-                print(f"Right Eye Center: {r_cx} Y: {r_cy}")
-                print(f"Left Iris Relative Pos Dx: {l_dx} Dy: {l_dy}")
-                print(f"Right Iris Relative Pos Dx: {r_dx} Dy: {r_dy}\n")
-
-                # Check if head pose estimation is enabled
-                if ENABLE_HEAD_POSE:
-                    pitch, yaw, roll = estimate_head_pose(mesh_points, (img_h, img_w))
-                    angle_buffer.add([pitch, yaw, roll])
-                    pitch, yaw, roll = angle_buffer.get_average()
-
-                    # Set initial angles on first successful estimation or recalibrate
-                    if initial_pitch is None or (key == ord("c") and calibrated):
-                        initial_pitch, initial_yaw, initial_roll = pitch, yaw, roll
-                        calibrated = True
-                        if PRINT_DATA:
-                            print("Head pose recalibrated.")
-
-                    # Adjust angles based on initial calibration
-                    if calibrated:
-                        pitch -= initial_pitch
-                        yaw -= initial_yaw
-                        roll -= initial_roll
-
-                    if PRINT_DATA:
-                        print(
-                            f"Head Pose Angles: Pitch={pitch}, Yaw={yaw}, Roll={roll}"
-                        )
-            # Logging data
-            if LOG_DATA:
-                timestamp = int(time.time() * 1000)  # Current timestamp in milliseconds
-                log_entry = [
-                    timestamp,
-                    l_cx,
-                    l_cy,
-                    r_cx,
-                    r_cy,
-                    l_dx,
-                    l_dy,
-                    r_dx,
-                    r_dy,
-                    TOTAL_BLINKS,
-                ]  # Include blink count in CSV
-                log_entry = [
-                    timestamp,
-                    l_cx,
-                    l_cy,
-                    r_cx,
-                    r_cy,
-                    l_dx,
-                    l_dy,
-                    r_dx,
-                    r_dy,
-                    TOTAL_BLINKS,
-                ]  # Include blink count in CSV
-
-                # Append head pose data if enabled
-                if ENABLE_HEAD_POSE:
-                    log_entry.extend([pitch, yaw, roll])
-                csv_data.append(log_entry)
-                if LOG_ALL_FEATURES:
-                    log_entry.extend([p for point in mesh_points for p in point])
-                csv_data.append(log_entry)
-
-            # Sending data through socket
-            packet = np.array([l_cx, l_cy, l_dx, l_dy], dtype=np.int32)
-            iris_socket.sendto(bytes(packet), SERVER_ADDRESS)
-
-            # Writing the on screen data on the frame
-            if SHOW_ON_SCREEN_DATA:
-                if IS_RECORDING:
-                    cv.circle(
-                        frame, (30, 30), 10, (0, 0, 255), -1
-                    )  # Red circle at the top-left corner
-                cv.putText(
-                    frame,
-                    f"Blinks: {TOTAL_BLINKS}",
-                    (30, 80),
-                    cv.FONT_HERSHEY_DUPLEX,
-                    0.8,
-                    (0, 255, 0),
-                    2,
-                    cv.LINE_AA,
-                )
-                if ENABLE_HEAD_POSE:
-                    cv.putText(
-                        frame,
-                        f"Pitch: {int(pitch)}",
-                        (30, 110),
-                        cv.FONT_HERSHEY_DUPLEX,
-                        0.8,
-                        (0, 255, 0),
-                        2,
-                        cv.LINE_AA,
-                    )
-                    cv.putText(
-                        frame,
-                        f"Yaw: {int(yaw)}",
-                        (30, 140),
-                        cv.FONT_HERSHEY_DUPLEX,
-                        0.8,
-                        (0, 255, 0),
-                        2,
-                        cv.LINE_AA,
-                    )
-                    cv.putText(
-                        frame,
-                        f"Roll: {int(roll)}",
-                        (30, 170),
-                        cv.FONT_HERSHEY_DUPLEX,
-                        0.8,
-                        (0, 255, 0),
-                        2,
-                        cv.LINE_AA,
-                    )
-
-        # Displaying the processed frame
-        cv.imshow("Eye Tracking", frame)
-        # Handle key presses
-        key = cv.waitKey(1) & 0xFF
-
-        # Calibrate on 'c' key press
-        if key == ord("c"):
-            initial_pitch, initial_yaw, initial_roll = pitch, yaw, roll
-            if PRINT_DATA:
-                print("Head pose recalibrated.")
-
-        # Inside the main loop, handle the 'r' key press
-        if key == ord("r"):
-
-            IS_RECORDING = not IS_RECORDING
-            if IS_RECORDING:
-                print("Recording started.")
-            else:
-                print("Recording paused.")
-
-        # Exit on 'q' key press
-        if key == ord("q"):
-            if PRINT_DATA:
-                print("Exiting program...")
-            break
-
-except Exception as e:
-    print(f"An error occurred: {e}")
-finally:
-    # Releasing camera and closing windows
-    cap.release()
-    cv.destroyAllWindows()
-    iris_socket.close()
-    if PRINT_DATA:
-        print("Program exited successfully.")
-
-    # Writing data to CSV file
-    if LOG_DATA and IS_RECORDING:
-        if PRINT_DATA:
-            print("Writing data to CSV...")
-        timestamp_str = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
-        csv_file_name = os.path.join(
-            LOG_FOLDER, f"eye_tracking_log_{timestamp_str}.csv"
+    if LOG_ALL_FEATURES:
+        column_names.extend(
+            [f"Landmark_{i}_X" for i in range(468)]
+            + [f"Landmark_{i}_Y" for i in range(468)]
         )
-        with open(csv_file_name, "w", newline="") as file:
-            writer = csv.writer(file)
-            writer.writerow(column_names)  # Writing column names
-            writer.writerows(csv_data)  # Writing data rows
+
+    # Main loop for video capture and processing
+    try:
+        # Adjust size for smoothing
+        angle_buffer = AngleBuffer(size=MOVING_AVERAGE_WINDOW)
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # Flipping the frame for a mirror effect
+            # I think we better not flip to correspond with real world... need to make sure later...
+            # frame = cv.flip(frame, 1)
+            rgb_frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+            img_h, img_w = frame.shape[:2]
+            results = mp_face_mesh.process(rgb_frame)
+
+            if results.multi_face_landmarks:
+                mesh_points = np.array(
+                    [
+                        np.multiply([p.x, p.y], [img_w, img_h]).astype(int)
+                        for p in results.multi_face_landmarks[0].landmark
+                    ]
+                )
+
+                # Get the 3D landmarks from facemesh x, y and z(z is distance from 0 points)
+                # just normalize values
+                mesh_points_3D = np.array(
+                    [[n.x, n.y, n.z]
+                        for n in results.multi_face_landmarks[0].landmark]
+                )
+                # getting the head pose estimation 3d points
+                head_pose_points_3D = np.multiply(
+                    mesh_points_3D[_indices_pose], [img_w, img_h, 1]
+                )
+                head_pose_points_2D = mesh_points[_indices_pose]
+
+                # collect nose three dimension and two dimension points
+                nose_3D_point = np.multiply(
+                    head_pose_points_3D[0], [1, 1, 3000])
+                nose_2D_point = head_pose_points_2D[0]
+
+                # create the camera matrix
+                focal_length = 1 * img_w
+
+                cam_matrix = np.array(
+                    [[focal_length, 0, img_h / 2],
+                        [0, focal_length, img_w / 2], [0, 0, 1]]
+                )
+
+                # The distortion parameters
+                dist_matrix = np.zeros((4, 1), dtype=np.float64)
+
+                head_pose_points_2D = np.delete(head_pose_points_3D, 2, axis=1)
+                head_pose_points_3D = head_pose_points_3D.astype(np.float64)
+                head_pose_points_2D = head_pose_points_2D.astype(np.float64)
+                # Solve PnP
+                success, rot_vec, trans_vec = cv.solvePnP(
+                    head_pose_points_3D, head_pose_points_2D, cam_matrix, dist_matrix
+                )
+                # Get rotational matrix
+                rotation_matrix, jac = cv.Rodrigues(rot_vec)
+
+                # Get angles
+                angles, mtxR, mtxQ, Qx, Qy, Qz = cv.RQDecomp3x3(
+                    rotation_matrix)
+
+                # Get the y rotation degree
+                angle_x = angles[0] * 360
+                angle_y = angles[1] * 360
+                z = angles[2] * 360
+
+                # if angle cross the values then
+                threshold_angle = 10
+                # See where the user's head tilting
+                if angle_y < -threshold_angle:
+                    face_looks = "Left"
+                elif angle_y > threshold_angle:
+                    face_looks = "Right"
+                elif angle_x < -threshold_angle:
+                    face_looks = "Down"
+                elif angle_x > threshold_angle:
+                    face_looks = "Up"
+                else:
+                    face_looks = "Forward"
+                if SHOW_ON_SCREEN_DATA:
+                    cv.putText(
+                        frame,
+                        f"Face Looking at {face_looks}",
+                        (img_w - 500, 20),
+                        cv.FONT_HERSHEY_TRIPLEX,
+                        0.8,
+                        (0, 255, 0),
+                        2,
+                        cv.LINE_AA,
+                    )
+                # Display the nose direction
+                nose_3d_projection, jacobian = cv.projectPoints(
+                    nose_3D_point, rot_vec, trans_vec, cam_matrix, dist_matrix
+                )
+
+                p1 = nose_2D_point
+                p2 = (
+                    int(nose_2D_point[0] + angle_y * 10),
+                    int(nose_2D_point[1] - angle_x * 10),
+                )
+
+                cv.line(frame, p1, p2, (255, 0, 255), 3)
+                # getting the blinking ratio
+                eyes_aspect_ratio = blinking_ratio(mesh_points_3D)
+                # print(f"Blinking ratio : {ratio}")
+                # checking if ear less then or equal to required threshold if yes then
+                # count the number of frame frame while eyes are closed.
+                if eyes_aspect_ratio <= BLINK_THRESHOLD:
+                    EYES_BLINK_FRAME_COUNTER += 1
+                # else check if eyes are closed is greater EYE_AR_CONSEC_FRAMES frame then
+                # count the this as a blink
+                # make frame counter equal to zero
+
+                else:
+                    if EYES_BLINK_FRAME_COUNTER > EYE_AR_CONSEC_FRAMES:
+                        TOTAL_BLINKS += 1
+                    EYES_BLINK_FRAME_COUNTER = 0
+
+                # Display all facial landmarks if enabled
+                if SHOW_ALL_FEATURES:
+                    for point in mesh_points:
+                        cv.circle(frame, tuple(point), 1, (0, 255, 0), -1)
+
+                # Process and display eye features
+                (l_cx, l_cy), l_radius = cv.minEnclosingCircle(
+                    mesh_points[LEFT_EYE_IRIS])
+                (r_cx, r_cy), r_radius = cv.minEnclosingCircle(
+                    mesh_points[RIGHT_EYE_IRIS])
+                center_left = np.array([l_cx, l_cy], dtype=np.int32)
+                center_right = np.array([r_cx, r_cy], dtype=np.int32)
+
+                # Highlighting the irises and corners of the eyes
+                cv.circle(
+                    frame, center_left, int(
+                        l_radius), (255, 0, 255), 2, cv.LINE_AA
+                )  # Left iris
+                cv.circle(
+                    frame, center_right, int(
+                        r_radius), (255, 0, 255), 2, cv.LINE_AA
+                )  # Right iris
+                cv.circle(
+                    frame,
+                    mesh_points[LEFT_EYE_INNER_CORNER][0],
+                    3,
+                    (255, 255, 255),
+                    -1,
+                    cv.LINE_AA,
+                )  # Left eye right corner
+                cv.circle(
+                    frame,
+                    mesh_points[LEFT_EYE_OUTER_CORNER][0],
+                    3,
+                    (0, 255, 255),
+                    -1,
+                    cv.LINE_AA,
+                )  # Left eye left corner
+                cv.circle(
+                    frame,
+                    mesh_points[RIGHT_EYE_INNER_CORNER][0],
+                    3,
+                    (255, 255, 255),
+                    -1,
+                    cv.LINE_AA,
+                )  # Right eye right corner
+                cv.circle(
+                    frame,
+                    mesh_points[RIGHT_EYE_OUTER_CORNER][0],
+                    3,
+                    (0, 255, 255),
+                    -1,
+                    cv.LINE_AA,
+                )  # Right eye left corner
+
+                # Calculating relative positions
+                l_dx, l_dy = vector_position(
+                    mesh_points[RIGHT_EYE_OUTER_CORNER], center_left
+                )
+                r_dx, r_dy = vector_position(
+                    mesh_points[RIGHT_EYE_OUTER_CORNER], center_right
+                )
+
+                left_eye_pos = pos_between_two_point(
+                    np.mean(mesh_points[LEFT_EYE_IRIS], axis=1),
+                    mesh_points[LEFT_EYE_OUTER_CORNER][0],
+                    mesh_points[LEFT_EYE_INNER_CORNER][0],
+                )
+                right_eye_pos = pos_between_two_point(
+                    np.mean(mesh_points[RIGHT_EYE_IRIS], axis=1),
+                    mesh_points[RIGHT_EYE_OUTER_CORNER][0],
+                    mesh_points[RIGHT_EYE_INNER_CORNER][0],
+                )
+
+                eyeblow_left_dist = distance(
+                    mesh_points[LEFT_EYELID_UPPER][0], mesh_points[LEFT_EYEBLOW][0]
+                )
+                eyeblow_right_dist = distance(
+                    mesh_points[RIGHT_EYELID_UPPER][0], mesh_points[RIGHT_EYEBLOW][0]
+                )
+                eyelid_left_dist = distance(
+                    mesh_points[LEFT_EYELID_UPPER][0], mesh_points[LEFT_EYELID_LOWER][0]
+                )
+                eyelid_right_dist = distance(
+                    mesh_points[RIGHT_EYELID_UPPER][0], mesh_points[RIGHT_EYELID_LOWER][0]
+                )
+                # print(
+                #    f"upper: {mesh_points[LEFT_EYELID_UPPER][0]} lower: {mesh_points[LEFT_EYELID_LOWER][0]}")
+                mouth_dist = distance(
+                    mesh_points[MOUTH_UPPER][0], mesh_points[MOUTH_LOWER][0]
+                )
+
+                # Printing data if enabled
+                if PRINT_DATA:
+                    # print(f"Left Eye Center X: {l_cx} Y: {l_cy}")
+                    # print(f"Right Eye Center X: {r_cx} Y: {r_cy}")
+                    # print(f"Left Eye Center: {left_eye_pos}")
+                    # print(f"Right Eye Center: {right_eye_pos}")
+                    # print(f"Right Eye Center: {r_cx} Y: {r_cy}")
+                    # print(f"Left Iris Relative Pos Dx: {l_dx} Dy: {l_dy}")
+                    # print(f"Right Iris Relative Pos Dx: {r_dx} Dy: {r_dy}\n")
+
+                    # Check if head pose estimation is enabled
+                    if ENABLE_HEAD_POSE:
+                        pitch, yaw, roll = estimate_head_pose(
+                            mesh_points, (img_h, img_w))
+                        angle_buffer.add([pitch, yaw, roll])
+                        pitch, yaw, roll = angle_buffer.get_average()
+
+                        # Set initial angles on first successful estimation or recalibrate
+                        if initial_pitch is None or (key == ord("c") and calibrated):
+                            initial_pitch, initial_yaw, initial_roll = pitch, yaw, roll
+                            calibrated = True
+                            if PRINT_DATA:
+                                print("Head pose recalibrated.")
+
+                        # Adjust angles based on initial calibration
+                        if calibrated:
+                            pitch -= initial_pitch
+                            yaw -= initial_yaw
+                            roll -= initial_roll
+
+                # Logging data
+                if LOG_DATA:
+                    # Current timestamp in milliseconds
+                    timestamp = int(time.time() * 1000)
+                    log_entry = [
+                        timestamp,
+                        l_cx,
+                        l_cy,
+                        r_cx,
+                        r_cy,
+                        l_dx,
+                        l_dy,
+                        r_dx,
+                        r_dy,
+                        TOTAL_BLINKS,
+                    ]  # Include blink count in CSV
+                    log_entry = [
+                        timestamp,
+                        l_cx,
+                        l_cy,
+                        r_cx,
+                        r_cy,
+                        l_dx,
+                        l_dy,
+                        r_dx,
+                        r_dy,
+                        TOTAL_BLINKS,
+                    ]  # Include blink count in CSV
+
+                    # Append head pose data if enabled
+                    if ENABLE_HEAD_POSE:
+                        log_entry.extend([pitch, yaw, roll])
+                    csv_data.append(log_entry)
+                    if LOG_ALL_FEATURES:
+                        log_entry.extend(
+                            [p for point in mesh_points for p in point])
+                    csv_data.append(log_entry)
+
+                # Sending data through socket
+                packet = np.array([l_cx, l_cy, l_dx, l_dy], dtype=np.int32)
+                iris_socket.sendto(bytes(packet), SERVER_ADDRESS)
+
+                # Writing the on screen data on the frame
+                if SHOW_ON_SCREEN_DATA:
+                    if IS_RECORDING:
+                        cv.circle(
+                            frame, (30, 30), 10, (0, 0, 255), -1
+                        )  # Red circle at the top-left corner
+                    cv.putText(
+                        frame,
+                        f"Blinks: {TOTAL_BLINKS}",
+                        (30, 80),
+                        cv.FONT_HERSHEY_DUPLEX,
+                        0.8,
+                        (0, 255, 0),
+                        2,
+                        cv.LINE_AA,
+                    )
+                    cv.putText(
+                        frame,
+                        f"Eye L: {left_eye_pos:.2f}",
+                        (30, 200),
+                        cv.FONT_HERSHEY_DUPLEX,
+                        0.8,
+                        (0, 255, 0),
+                        2,
+                        cv.LINE_AA,
+                    )
+                    cv.putText(
+                        frame,
+                        f"Eye R: {right_eye_pos:.2f}",
+                        (30, 230),
+                        cv.FONT_HERSHEY_DUPLEX,
+                        0.8,
+                        (0, 255, 0),
+                        2,
+                        cv.LINE_AA,
+                    )
+                    cv.putText(
+                        frame,
+                        f"Mouth: {mouth:.2f}",
+                        (img_w - 200, 60),
+                        cv.FONT_HERSHEY_DUPLEX,
+                        0.7,
+                        (0, 255, 0),
+                        2,
+                        cv.LINE_AA,
+                    )
+                    cv.putText(
+                        frame,
+                        f"Eyeblow L: {eyeblow_left:.2f}",
+                        (img_w - 200, 90),
+                        cv.FONT_HERSHEY_DUPLEX,
+                        0.7,
+                        (0, 255, 0),
+                        2,
+                        cv.LINE_AA,
+                    )
+                    cv.putText(
+                        frame,
+                        f"Eyeblow R: {eyeblow_right:.2f}",
+                        (img_w - 200, 120),
+                        cv.FONT_HERSHEY_DUPLEX,
+                        0.7,
+                        (0, 255, 0),
+                        2,
+                        cv.LINE_AA,
+                    )
+                    cv.putText(
+                        frame,
+                        f"Eyelid L: {eyelid_left:.2f}",
+                        (img_w - 200, 150),
+                        cv.FONT_HERSHEY_DUPLEX,
+                        0.7,
+                        (0, 255, 0),
+                        2,
+                        cv.LINE_AA,
+                    )
+                    cv.putText(
+                        frame,
+                        f"Eyelid R: {eyelid_right:.2f}",
+                        (img_w - 200, 180),
+                        cv.FONT_HERSHEY_DUPLEX,
+                        0.7,
+                        (0, 255, 0),
+                        2,
+                        cv.LINE_AA,
+                    )
+                    if ENABLE_HEAD_POSE:
+                        cv.putText(
+                            frame,
+                            f"Pitch: {int(pitch)}",
+                            (30, 110),
+                            cv.FONT_HERSHEY_DUPLEX,
+                            0.8,
+                            (0, 255, 0),
+                            2,
+                            cv.LINE_AA,
+                        )
+                        cv.putText(
+                            frame,
+                            f"Yaw: {int(yaw)}",
+                            (30, 140),
+                            cv.FONT_HERSHEY_DUPLEX,
+                            0.8,
+                            (0, 255, 0),
+                            2,
+                            cv.LINE_AA,
+                        )
+                        cv.putText(
+                            frame,
+                            f"Roll: {int(roll)}",
+                            (30, 170),
+                            cv.FONT_HERSHEY_DUPLEX,
+                            0.8,
+                            (0, 255, 0),
+                            2,
+                            cv.LINE_AA,
+                        )
+            update_event.set()
+            # Displaying the processed frame
+            cv.imshow("Eye Tracking", frame)
+            # Handle key presses
+            key = cv.waitKey(1) & 0xFF
+
+            # Calibrate on 'c' key press
+            if key == ord("c"):
+                initial_pitch, initial_yaw, initial_roll = pitch, yaw, roll
+                if PRINT_DATA:
+                    print("Head pose recalibrated.")
+
+            # Inside the main loop, handle the 'r' key press
+            if key == ord("r"):
+
+                IS_RECORDING = not IS_RECORDING
+                if IS_RECORDING:
+                    print("Recording started.")
+                else:
+                    print("Recording paused.")
+
+            # Exit on 'q' key press
+            if key == ord("q"):
+                if PRINT_DATA:
+                    print("Exiting program...")
+                exit_event.set()
+                break
+            if key == ord("a"):
+                next_event.set()
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    finally:
+        # Releasing camera and closing windows
+        cap.release()
+        cv.destroyAllWindows()
+        iris_socket.close()
         if PRINT_DATA:
-            print(f"Data written to {csv_file_name}")
+            print("Program exited successfully.")
+
+        # Writing data to CSV file
+        if LOG_DATA and IS_RECORDING:
+            if PRINT_DATA:
+                print("Writing data to CSV...")
+            timestamp_str = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+            csv_file_name = os.path.join(
+                LOG_FOLDER, f"eye_tracking_log_{timestamp_str}.csv"
+            )
+            with open(csv_file_name, "w", newline="") as file:
+                writer = csv.writer(file)
+                writer.writerow(column_names)  # Writing column names
+                writer.writerows(csv_data)  # Writing data rows
+            if PRINT_DATA:
+                print(f"Data written to {csv_file_name}")
+
+
+def main() -> None:
+    global mouth_dist, eyeblow_left_dist, eyeblow_right_dist, eyelid_left_dist, eyelid_right_dist
+    global mouth, eyeblow_left, eyeblow_right, eyelid_left, eyelid_right
+    calib_mouth = 0
+    calib_eyeblow_left = 0
+    calib_eyeblow_right = 0
+    calib_eyelid_left = 0
+    calib_eyelid_right = 0
+
+    calib_mouth_min = 0
+    calib_eyeblow_left_min = 0
+    calib_eyeblow_right_min = 0
+    calib_eyelid_left_min = 0
+    calib_eyelid_right_min = 0
+    calib_mouth_max = 0
+    calib_eyeblow_left_max = 0
+    calib_eyeblow_right_max = 0
+    calib_eyelid_left_max = 0
+    calib_eyelid_right_max = 0
+    capture_thread = threading.Thread(target=capture)
+    capture_thread.start()
+    time.sleep(1)
+    print("キャリブ1: 口と目を閉じて画像ウインドウ上で'a'を押す")
+    next_event.wait()
+    next_event.clear()
+
+    for i in range(0, CALIB_NUM):
+        update_event.wait()
+        update_event.clear()
+        calib_mouth += mouth_dist
+        calib_eyeblow_left += eyeblow_left_dist
+        calib_eyeblow_right += eyeblow_right_dist
+        calib_eyelid_left += eyelid_left_dist
+        calib_eyelid_right += eyelid_right_dist
+        print(f"mouth: {mouth_dist:.2f} eyeblow_left: {eyeblow_left_dist:.2f} eyeblow_right: {eyeblow_right_dist:.2f} eyelid_left: {eyelid_left_dist:.2f} eyelid_right: {eyelid_right_dist:.2f}")
+    calib_mouth_min = calib_mouth / CALIB_NUM
+    calib_eyeblow_left_min = calib_eyeblow_left / CALIB_NUM
+    calib_eyeblow_right_min = calib_eyeblow_right / CALIB_NUM
+    calib_eyelid_left_min = calib_eyelid_left / CALIB_NUM
+    calib_eyelid_right_min = calib_eyelid_right / CALIB_NUM
+    calib_mouth = 0
+    calib_eyeblow_left = 0
+    calib_eyeblow_right = 0
+    calib_eyelid_left = 0
+    calib_eyelid_right = 0
+    print()
+    print(f"CALIB CLOSE mouth: {calib_mouth_min:.2f} eyeblow_left: {calib_eyeblow_left_min:.2f} eyeblow_right: {calib_eyeblow_right_min:.2f} eyelid_left: {calib_eyelid_left_min:.2f} eyelid_right: {calib_eyelid_right_min:.2f}")
+
+    print()
+    print("キャリブ2: 口と目を閉じて画像ウインドウ上で'a'を押す")
+    next_event.wait()
+    next_event.clear()
+    for i in range(0, CALIB_NUM):
+        update_event.wait()
+        update_event.clear()
+        calib_mouth += mouth_dist
+        calib_eyeblow_left += eyeblow_left_dist
+        calib_eyeblow_right += eyeblow_right_dist
+        calib_eyelid_left += eyelid_left_dist
+        calib_eyelid_right += eyelid_right_dist
+        print(f"mouth: {mouth_dist:.2f} eyeblow_left: {eyeblow_left_dist:.2f} eyeblow_right: {eyeblow_right_dist:.2f} eyelid_left: {eyelid_left_dist:.2f} eyelid_right: {eyelid_right_dist:.2f}")
+
+    calib_mouth_max = calib_mouth / CALIB_NUM
+    calib_eyeblow_left_max = calib_eyeblow_left / CALIB_NUM
+    calib_eyeblow_right_max = calib_eyeblow_right / CALIB_NUM
+    calib_eyelid_left_max = calib_eyelid_left / CALIB_NUM
+    calib_eyelid_right_max = calib_eyelid_right / CALIB_NUM
+    calib_mouth = 0
+    calib_eyeblow_left = 0
+    calib_eyeblow_right = 0
+    calib_eyelid_left = 0
+    calib_eyelid_right = 0
+    print()
+    print(f"CALIB OPEN mouth: {calib_mouth_max:.2f} eyeblow_left: {calib_eyeblow_left_max:.2f} eyeblow_right: {calib_eyeblow_right_max:.2f} eyelid_left: {calib_eyelid_left_max:.2f} eyelid_right: {calib_eyelid_right_max:.2f}")
+
+    print()
+    print("画像ウインドウ上で'a'を押してスタート。'q'で終了")
+    next_event.wait()
+    next_event.clear()
+    while not exit_event.is_set():
+        update_event.wait(1)
+        update_event.clear()
+        print(
+            f"in: {mouth_dist} min:{calib_mouth_min} max: {calib_mouth_max}")
+        mouth = normalize(
+            mouth_dist, calib_mouth_min, calib_mouth_max)
+        eyeblow_left = normalize(
+            eyeblow_left_dist, calib_eyeblow_left_min, calib_eyeblow_left_max
+        )
+        eyeblow_right = normalize(
+            eyeblow_right_dist, calib_eyeblow_right_min, calib_eyeblow_right_max
+        )
+        eyelid_left = normalize(
+            eyelid_left_dist, calib_eyelid_left_min, calib_eyelid_left_max
+        )
+        eyelid_right = normalize(
+            eyelid_right_dist, calib_eyelid_right_min, calib_eyelid_right_max
+        )
+
+        print(f"mouth: {mouth:.2f} eyeblow_left: {eyeblow_left:.2f} eyeblow_right: {eyeblow_right:.2f} eyelid_left: {eyelid_left:.2f} eyelid_right: {eyelid_right:.2f}")
+        print(f"left_eye_pos: {left_eye_pos:.2f} right_eye_pos: {right_eye_pos:.2f}")
+        print(
+            f"Head Pose Angles: Pitch={pitch:.2f}, Yaw={yaw:.2f}, Roll={roll:.2f}"
+        )
+        print(f"Total Blinks: {TOTAL_BLINKS}")
+
+
+if __name__ == "__main__":
+    main()
