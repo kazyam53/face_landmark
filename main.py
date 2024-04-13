@@ -56,6 +56,7 @@ This project is intended for educational and research purposes in fields like av
 """
 
 import cv2 as cv
+import json
 import numpy as np
 import mediapipe as mp
 import math
@@ -134,12 +135,10 @@ EYE_AR_CONSEC_FRAMES = 2
 # These indices correspond to the specific facial landmarks used for head pose estimation.
 LEFT_EYE_IRIS = [474, 475, 476, 477]
 RIGHT_EYE_IRIS = [469, 470, 471, 472]
-LEFT_EYE_OUTER_CORNER = [33]
-LEFT_EYE_INNER_CORNER = [133]
-RIGHT_EYE_OUTER_CORNER = [362]
-RIGHT_EYE_INNER_CORNER = [263]
-RIGHT_EYE_OUTER_CORNER = [362]
-RIGHT_EYE_INNER_CORNER = [263]
+LEFT_EYE_OUTER_CORNER = [263]
+LEFT_EYE_INNER_CORNER = [362]
+RIGHT_EYE_OUTER_CORNER = [33]
+RIGHT_EYE_INNER_CORNER = [133]
 RIGHT_EYE_POINTS = [33, 160, 159, 158, 133, 153, 145, 144]
 LEFT_EYE_POINTS = [362, 385, 386, 387, 263, 373, 374, 380]
 RIGHT_EYELID_UPPER = [27]
@@ -202,12 +201,6 @@ SERVER_ADDRESS = (SERVER_IP, SERVER_PORT)
 # If set to false it will wait for your command (hittig 'r') to start logging.
 IS_RECORDING = False  # Controls whether data is being logged
 
-# Command-line arguments for camera source
-parser = argparse.ArgumentParser(description="Eye Tracking Application")
-parser.add_argument(
-    "-c", "--camSource", help="Source of camera", default=str(DEFAULT_WEBCAM)
-)
-args = parser.parse_args()
 
 # Iris and eye corners landmarks indices
 LEFT_IRIS = [474, 475, 476, 477]
@@ -234,11 +227,14 @@ eyeblow_left = 0
 eyeblow_right = 0
 eyelid_left = 0
 eyelid_right = 0
-mouth = 0
+mouth_ver_dist = 0
+mouth_hor_dist = 0
 eyeblow_left_dist = 0
 eyeblow_right_dist = 0
 eyelid_left_dist = 0
 eyelid_right_dist = 0
+eye_left_corner_dist = 0
+eye_right_corner_dist = 0
 left_eye_pos = 0
 right_eye_pos = 0
 
@@ -425,12 +421,12 @@ def blinking_ratio(landmarks):
 
 def pos_between_two_point(input, min, max):
     dist_from_min = math.sqrt(
-        (input[0] - min[0]) * (input[0] - min[0])
-        + (input[1] - min[1]) * (input[1] - min[1])
+        (input[0] - min[0]) ** 2
+        + (input[1] - min[1]) ** 2
     )
     dist_from_max = math.sqrt(
-        (input[0] - max[0]) * (input[0] - max[0])
-        + (input[1] - max[1]) * (input[1] - max[1])
+        (input[0] - max[0]) ** 2
+        + (input[1] - max[1]) ** 2
     )
     return dist_from_min / (dist_from_min + dist_from_max)
 
@@ -449,7 +445,7 @@ def normalize(input, min, max):
 
 
 def capture() -> None:
-    global mouth_dist, eyeblow_left_dist, eyeblow_right_dist, eyelid_left_dist, eyelid_right_dist
+    global mouth_ver_dist, mouth_hor_dist, eyeblow_left_dist, eyeblow_right_dist, eyelid_left_dist, eyelid_right_dist, eye_left_corner_dist, eye_right_corner_dist
     global left_eye_pos, right_eye_pos
     global update_event
     global next_event
@@ -472,8 +468,7 @@ def capture() -> None:
         min_detection_confidence=MIN_DETECTION_CONFIDENCE,
         min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
     )
-    cam_source = int(args.camSource)
-    cap = cv.VideoCapture(cam_source)
+    cap = cv.VideoCapture(0)
 
     # Initializing socket for data transmission
     iris_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -692,7 +687,6 @@ def capture() -> None:
                 r_dx, r_dy = vector_position(
                     mesh_points[RIGHT_EYE_OUTER_CORNER], center_right
                 )
-
                 left_eye_pos = pos_between_two_point(
                     np.mean(mesh_points[LEFT_EYE_IRIS], axis=1),
                     mesh_points[LEFT_EYE_OUTER_CORNER][0],
@@ -704,6 +698,15 @@ def capture() -> None:
                     mesh_points[RIGHT_EYE_INNER_CORNER][0],
                 )
 
+                eye_left_corner_dist = distance(
+                    mesh_points[LEFT_EYE_INNER_CORNER][0], mesh_points[LEFT_EYE_OUTER_CORNER][0]
+                )
+                eye_right_corner_dist = distance(
+                    mesh_points[RIGHT_EYE_INNER_CORNER][0], mesh_points[RIGHT_EYE_OUTER_CORNER][0]
+                )
+                eyeblow_right_dist = distance(
+                    mesh_points[RIGHT_EYELID_UPPER][0], mesh_points[RIGHT_EYEBLOW][0]
+                )
                 eyeblow_left_dist = distance(
                     mesh_points[LEFT_EYELID_UPPER][0], mesh_points[LEFT_EYEBLOW][0]
                 )
@@ -718,10 +721,12 @@ def capture() -> None:
                 )
                 # print(
                 #    f"upper: {mesh_points[LEFT_EYELID_UPPER][0]} lower: {mesh_points[LEFT_EYELID_LOWER][0]}")
-                mouth_dist = distance(
+                mouth_ver_dist = distance(
                     mesh_points[MOUTH_UPPER][0], mesh_points[MOUTH_LOWER][0]
                 )
-
+                mouth_hor_dist = distance(
+                    mesh_points[LEFT_MOUTH_CORNER_INDEX], mesh_points[RIGHT_MOUTH_CORNER_INDEX]
+                )
                 # Printing data if enabled
                 if PRINT_DATA:
                     # print(f"Left Eye Center X: {l_cx} Y: {l_cy}")
@@ -968,7 +973,16 @@ def capture() -> None:
 
 
 def main() -> None:
-    global mouth_dist, eyeblow_left_dist, eyeblow_right_dist, eyelid_left_dist, eyelid_right_dist
+    # Command-line arguments for camera source
+    parser = argparse.ArgumentParser(description="Eye Tracking Application")
+    parser.add_argument(
+        "-c", "--calib", help="Do calibration", action="store_true",
+    )
+    args = parser.parse_args()
+    setting_path = "setting/"
+    setting_file_name = "calib.json"
+
+    global mouth_ver_dist, mouth_hor_dist, eyeblow_left_dist, eyeblow_right_dist, eyelid_left_dist, eyelid_right_dist, eye_left_corner_dist, eye_right_corner_dist
     global mouth, eyeblow_left, eyeblow_right, eyelid_left, eyelid_right
     calib_mouth = 0
     calib_eyeblow_left = 0
@@ -989,85 +1003,123 @@ def main() -> None:
     capture_thread = threading.Thread(target=capture)
     capture_thread.start()
     time.sleep(1)
-    print("キャリブ1: 口と目を閉じて画像ウインドウ上で'a'を押す")
-    next_event.wait()
-    next_event.clear()
 
-    for i in range(0, CALIB_NUM):
-        update_event.wait()
-        update_event.clear()
-        calib_mouth += mouth_dist
-        calib_eyeblow_left += eyeblow_left_dist
-        calib_eyeblow_right += eyeblow_right_dist
-        calib_eyelid_left += eyelid_left_dist
-        calib_eyelid_right += eyelid_right_dist
-        print(f"mouth: {mouth_dist:.2f} eyeblow_left: {eyeblow_left_dist:.2f} eyeblow_right: {eyeblow_right_dist:.2f} eyelid_left: {eyelid_left_dist:.2f} eyelid_right: {eyelid_right_dist:.2f}")
-    calib_mouth_min = calib_mouth / CALIB_NUM
-    calib_eyeblow_left_min = calib_eyeblow_left / CALIB_NUM
-    calib_eyeblow_right_min = calib_eyeblow_right / CALIB_NUM
-    calib_eyelid_left_min = calib_eyelid_left / CALIB_NUM
-    calib_eyelid_right_min = calib_eyelid_right / CALIB_NUM
-    calib_mouth = 0
-    calib_eyeblow_left = 0
-    calib_eyeblow_right = 0
-    calib_eyelid_left = 0
-    calib_eyelid_right = 0
-    print()
-    print(f"CALIB CLOSE mouth: {calib_mouth_min:.2f} eyeblow_left: {calib_eyeblow_left_min:.2f} eyeblow_right: {calib_eyeblow_right_min:.2f} eyelid_left: {calib_eyelid_left_min:.2f} eyelid_right: {calib_eyelid_right_min:.2f}")
+    if (args.calib):
+        print("キャリブ1: 口と目を閉じて画像ウインドウ上で'a'を押す")
+        next_event.wait()
+        next_event.clear()
 
-    print()
-    print("キャリブ2: 口と目を閉じて画像ウインドウ上で'a'を押す")
-    next_event.wait()
-    next_event.clear()
-    for i in range(0, CALIB_NUM):
-        update_event.wait()
-        update_event.clear()
-        calib_mouth += mouth_dist
-        calib_eyeblow_left += eyeblow_left_dist
-        calib_eyeblow_right += eyeblow_right_dist
-        calib_eyelid_left += eyelid_left_dist
-        calib_eyelid_right += eyelid_right_dist
-        print(f"mouth: {mouth_dist:.2f} eyeblow_left: {eyeblow_left_dist:.2f} eyeblow_right: {eyeblow_right_dist:.2f} eyelid_left: {eyelid_left_dist:.2f} eyelid_right: {eyelid_right_dist:.2f}")
+        for i in range(0, CALIB_NUM):
+            update_event.wait()
+            update_event.clear()
+            calib_mouth += mouth_ver_dist / mouth_hor_dist
+            calib_eyeblow_left += eyeblow_left_dist / eye_left_corner_dist
+            calib_eyeblow_right += eyeblow_right_dist / eye_right_corner_dist
+            calib_eyelid_left += eyelid_left_dist / eye_left_corner_dist
+            calib_eyelid_right += eyelid_right_dist / eye_right_corner_dist
+            print(f"mouth: {mouth_ver_dist:.2f} eyeblow_left: {eyeblow_left_dist:.2f} eyeblow_right: {eyeblow_right_dist:.2f} eyelid_left: {eyelid_left_dist:.2f} eyelid_right: {eyelid_right_dist:.2f}")
+        calib_mouth_min = calib_mouth / CALIB_NUM
+        calib_eyeblow_left_min = calib_eyeblow_left / CALIB_NUM
+        calib_eyeblow_right_min = calib_eyeblow_right / CALIB_NUM
+        calib_eyelid_left_min = calib_eyelid_left / CALIB_NUM
+        calib_eyelid_right_min = calib_eyelid_right / CALIB_NUM
+        calib_mouth = 0
+        calib_eyeblow_left = 0
+        calib_eyeblow_right = 0
+        calib_eyelid_left = 0
+        calib_eyelid_right = 0
+        print()
+        print(f"CALIB CLOSE mouth: {calib_mouth_min:.2f} eyeblow_left: {calib_eyeblow_left_min:.2f} eyeblow_right: {calib_eyeblow_right_min:.2f} eyelid_left: {calib_eyelid_left_min:.2f} eyelid_right: {calib_eyelid_right_min:.2f}")
 
-    calib_mouth_max = calib_mouth / CALIB_NUM
-    calib_eyeblow_left_max = calib_eyeblow_left / CALIB_NUM
-    calib_eyeblow_right_max = calib_eyeblow_right / CALIB_NUM
-    calib_eyelid_left_max = calib_eyelid_left / CALIB_NUM
-    calib_eyelid_right_max = calib_eyelid_right / CALIB_NUM
-    calib_mouth = 0
-    calib_eyeblow_left = 0
-    calib_eyeblow_right = 0
-    calib_eyelid_left = 0
-    calib_eyelid_right = 0
-    print()
-    print(f"CALIB OPEN mouth: {calib_mouth_max:.2f} eyeblow_left: {calib_eyeblow_left_max:.2f} eyeblow_right: {calib_eyeblow_right_max:.2f} eyelid_left: {calib_eyelid_left_max:.2f} eyelid_right: {calib_eyelid_right_max:.2f}")
+        print()
+        print("キャリブ2: 口と目を閉じて画像ウインドウ上で'a'を押す")
+        next_event.wait()
+        next_event.clear()
+        for i in range(0, CALIB_NUM):
+            update_event.wait()
+            update_event.clear()
+            calib_mouth += mouth_ver_dist / mouth_hor_dist
+            calib_eyeblow_left += eyeblow_left_dist / eye_left_corner_dist
+            calib_eyeblow_right += eyeblow_right_dist / eye_right_corner_dist
+            calib_eyelid_left += eyelid_left_dist / eye_left_corner_dist
+            calib_eyelid_right += eyelid_right_dist / eye_right_corner_dist
+            print(f"mouth: {mouth_ver_dist:.2f} eyeblow_left: {eyeblow_left_dist:.2f} eyeblow_right: {eyeblow_right_dist:.2f} eyelid_left: {eyelid_left_dist:.2f} eyelid_right: {eyelid_right_dist:.2f}")
 
-    print()
-    print("画像ウインドウ上で'a'を押してスタート。'q'で終了")
-    next_event.wait()
-    next_event.clear()
+        calib_mouth_max = calib_mouth / CALIB_NUM
+        calib_eyeblow_left_max = calib_eyeblow_left / CALIB_NUM
+        calib_eyeblow_right_max = calib_eyeblow_right / CALIB_NUM
+        calib_eyelid_left_max = calib_eyelid_left / CALIB_NUM
+        calib_eyelid_right_max = calib_eyelid_right / CALIB_NUM
+        calib_mouth = 0
+        calib_eyeblow_left = 0
+        calib_eyeblow_right = 0
+        calib_eyelid_left = 0
+        calib_eyelid_right = 0
+        print()
+        print(f"CALIB OPEN mouth: {calib_mouth_max:.2f} eyeblow_left: {calib_eyeblow_left_max:.2f} eyeblow_right: {calib_eyeblow_right_max:.2f} eyelid_left: {calib_eyelid_left_max:.2f} eyelid_right: {calib_eyelid_right_max:.2f}")
+        if not os.path.exists(setting_path):
+            os.makedirs(setting_path)
+        setting_json = {}
+        setting_json["close"] = {}
+        setting_json["close"]["mouth"] = calib_mouth_min
+        setting_json["close"]["eyeblow_left"] = calib_eyeblow_left_min
+        setting_json["close"]["eyeblow_right"] = calib_eyeblow_right_min
+        setting_json["close"]["eyelid_left"] = calib_eyelid_left_min
+        setting_json["close"]["eyelid_right"] = calib_eyelid_right_min
+        setting_json["open"] = {}
+        setting_json["open"]["mouth"] = calib_mouth_max
+        setting_json["open"]["eyeblow_left"] = calib_eyeblow_left_max
+        setting_json["open"]["eyeblow_right"] = calib_eyeblow_right_max
+        setting_json["open"]["eyelid_left"] = calib_eyelid_left_max
+        setting_json["open"]["eyelid_right"] = calib_eyelid_right_max
+        with open(setting_path + setting_file_name, mode="wt", encoding="utf-8") as f:
+            json.dump(setting_json, f, ensure_ascii=False, indent=2)
+        print()
+        print("画像ウインドウ上で'a'を押してスタート。'q'で終了")
+        next_event.wait()
+        next_event.clear()
+
+    else:
+        if not os.path.exists(setting_path + setting_file_name):
+            print("キャリブレーションファイルがありません。キャリブレーションを実行してください。")
+            print("python3 main.py --calib")
+            return
+        json_open = open(setting_path + setting_file_name, "r")
+        setting = json.load(json_open)
+        calib_mouth_min = setting["close"]["mouth"]
+        calib_eyeblow_left_min = setting["close"]["eyeblow_left"]
+        calib_eyeblow_right_min = setting["close"]["eyeblow_right"]
+        calib_eyelid_left_min = setting["close"]["eyelid_left"]
+        calib_eyelid_right_min = setting["close"]["eyelid_right"]
+        calib_mouth_max = setting["open"]["mouth"]
+        calib_eyeblow_left_max = setting["open"]["eyeblow_left"]
+        calib_eyeblow_right_max = setting["open"]["eyeblow_right"]
+        calib_eyelid_left_max = setting["open"]["eyelid_left"]
+        calib_eyelid_right_max = setting["open"]["eyelid_right"]
+
     while not exit_event.is_set():
         update_event.wait(1)
         update_event.clear()
-        print(
-            f"in: {mouth_dist} min:{calib_mouth_min} max: {calib_mouth_max}")
         mouth = normalize(
-            mouth_dist, calib_mouth_min, calib_mouth_max)
+            mouth_ver_dist / mouth_hor_dist, calib_mouth_min, calib_mouth_max)
         eyeblow_left = normalize(
-            eyeblow_left_dist, calib_eyeblow_left_min, calib_eyeblow_left_max
+            eyeblow_left_dist / eye_left_corner_dist, calib_eyeblow_left_min, calib_eyeblow_left_max
         )
         eyeblow_right = normalize(
-            eyeblow_right_dist, calib_eyeblow_right_min, calib_eyeblow_right_max
+            eyeblow_right_dist /
+            eye_right_corner_dist, calib_eyeblow_right_min, calib_eyeblow_right_max
         )
         eyelid_left = normalize(
-            eyelid_left_dist, calib_eyelid_left_min, calib_eyelid_left_max
+            eyelid_left_dist / eye_left_corner_dist, calib_eyelid_left_min, calib_eyelid_left_max
         )
         eyelid_right = normalize(
-            eyelid_right_dist, calib_eyelid_right_min, calib_eyelid_right_max
+            eyelid_right_dist / eye_right_corner_dist, calib_eyelid_right_min, calib_eyelid_right_max
         )
-
+        # 各計測値の出力
+        print("-----------------------------")
         print(f"mouth: {mouth:.2f} eyeblow_left: {eyeblow_left:.2f} eyeblow_right: {eyeblow_right:.2f} eyelid_left: {eyelid_left:.2f} eyelid_right: {eyelid_right:.2f}")
-        print(f"left_eye_pos: {left_eye_pos:.2f} right_eye_pos: {right_eye_pos:.2f}")
+        print(
+            f"left_eye_pos: {left_eye_pos:.2f} right_eye_pos: {right_eye_pos:.2f}")
         print(
             f"Head Pose Angles: Pitch={pitch:.2f}, Yaw={yaw:.2f}, Roll={roll:.2f}"
         )
